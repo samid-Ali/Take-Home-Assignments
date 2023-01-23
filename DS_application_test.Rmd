@@ -1,0 +1,244 @@
+---
+title: "Modelling Report"
+output: 
+  html_document:
+    toc: TRUE
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+date: "Last edited:  `r format(Sys.Date(), '%d %B %Y')`"
+---
+
+```{r,  include=FALSE}
+lapply(c("ggplot2", "dplyr", "stringr", "purrr", "magick", "data.table", "broom", "readxl", "lubridate", "knitr"),
+       require, character.only = TRUE)
+
+
+```
+
+
+
+## Loading Data
+
+- please update to correct file paths
+```{r Loading Data}
+df1 <- fread("G:/Samid work/Bank of England/Data Scientist Test/LEIsTable.csv")
+df2 <- read_excel("G:/Samid work/Bank of England/Data Scientist Test/SFT_Data.xlsx")
+```
+# Q1 
+
+## Confirming Counterparty Names
+```{r Confirming Counterparty Names}
+merged_df <- df2 %>% 
+  left_join(df1, by = c("ID_of_the_other_counterparty" = "LEI")) %>% 
+  mutate(Check = Name_of_the_other_counterparty ==NAME)
+
+unique(merged_df$Check)
+
+incorrect_name <- merged_df$Name_of_the_other_counterparty[merged_df$Name_of_the_other_counterparty != merged_df$NAME]
+correct_name <- merged_df$NAME[merged_df$Name_of_the_other_counterparty != merged_df$NAME]
+
+sum_of_eroneous_reports_loans_value <- sum(merged_df$Value_of_loan[merged_df$Name_of_the_other_counterparty != merged_df$NAME], na.rm = TRUE)
+sum_of_all_reports_loan_value <- sum(merged_df$Value_of_loan, na.rm = TRUE)
+
+sum(merged_df$Value_of_loan[merged_df$Name_of_the_other_counterparty != merged_df$NAME], na.rm = TRUE)/sum(merged_df$Value_of_loan, na.rm = TRUE)
+
+kable(cbind(incorrect_name, correct_name), col.names = c("Incorrectly reported Counterparty names", "Correct Counterparty Name"))
+```
+
+1)a) The above table shows a list of counterparties which have been incorrectly named, along with the correct name based on their LEI.  
+   These eroneous reports only make up less than `r paste(round((sum_of_eroneous_reports_loans_value/ sum_of_all_reports_loan_value)*100, 2), "%")` of the total loan value, suggesting that they will unlikely be influential results. For this reason I will keep them in the dataset, however for further analysis it would be recommended to further investigate these entries to confirm that they have been accurately reported.
+
+
+## Loan value Visualisation
+
+```{r Loan value Visualisation}
+ggplot(data = df2) + 
+  geom_point(mapping = aes(x = Counterparty_ID , y = Value_of_loan),colour="Red3")
+
+```
+
+1)b)  The chart above shows 4 potential outliers with much greater values than otherwise reported. These would likely bias the results upwards, and as such I will be excluding them from further analysis. This can be seen by comparing the mean and sum for `Value_of_loan`, with and without the outliers. The outliers are found by sorting `Value_of_loan` in descending order and picking the first 4 values.
+          
+
+## summary statistics for Loan Value
+
+```{r summary statistics for Loan Value}
+loan_value_outliers <- head(sort(df2$Value_of_loan, decreasing = TRUE),4)
+
+df2_exc_outliers <- df2[!(df2$Value_of_loan %in% loan_value_outliers),] 
+
+
+mean(df2$Value_of_loan,na.rm = T)
+sum(df2$Value_of_loan,na.rm = T)
+
+mean(df2_exc_outliers$Value_of_loan,na.rm = T)
+  sum(df2_exc_outliers$Value_of_loan,na.rm = T)
+
+```
+
+## Missing Values
+
+```{r Missing Values}
+missing_loans <- merged_df[is.na(merged_df$Value_of_loan),]
+missing_colateral <- merged_df[is.na(merged_df$Collateral_market_value),]
+
+
+all(missing_loans == missing_colateral)
+```
+
+
+1)c) A further data quality issue is that are a number of loan `Value_of_loan` entries which show as na. This means that these entries can not be used for further analysis, and so will be excluded from the dataset 
+
+
+
+# Q2
+
+2) Given that they appear to constitute a small amount of the total loan value, the incorrect naming of the counterparties is unlikely to have a significant impact on further analysis, and so can be included in our dataset.    
+However, the potential outliers in loan value will likely influence results. Therefore I will be filtering them out. Additionally, I will be excluding the loan values which are not given a value. With the information given we can not meaningfully interpolate the data to obtain estimates for what the loan value would be. Mean imputation is commonly used however it is possible that the missing data may be arising systematically, something that would be masked by replacing their loan value with the mean. Given the relatively large sample size of the overall data set, especially when comparing the small number of missing values, there is little lost in excluding these values.
+
+
+## Filtering Data
+
+```{r Filtering Data}
+df2_proc <- df2 %>% 
+  filter(!is.na(Value_of_loan) & !Value_of_loan %in% loan_value_outliers)
+```
+
+
+# Q3
+
+
+## Summary Statistics 
+
+```{r Summary Statistics }
+
+
+mean_loan <- mean(df2_exc_outliers$Value_of_loan, na.rm = T)
+min_loan <- min(df2_exc_outliers$Value_of_loan, na.rm = T)
+max_loan <- max(df2_exc_outliers$Value_of_loan, na.rm = T)
+median_loan <- median(df2_exc_outliers$Value_of_loan, na.rm = T)
+sd_loan <- sd(df2_exc_outliers$Value_of_loan, na.rm = T)
+
+kable(cbind(mean_loan, min_loan, max_loan, median_loan, sd_loan))
+
+ggplot(data = df2_exc_outliers, aes(x = Value_of_loan)) + 
+  geom_histogram() +
+  ggtitle("Loan Value Histogram")
+
+mean_colateral <- mean(df2_exc_outliers$Collateral_market_value, na.rm = T)
+min_colateral <- min(df2_exc_outliers$Collateral_market_value, na.rm = T)
+max_colateral <- max(df2_exc_outliers$Collateral_market_value, na.rm = T)
+median_colateral <- median(df2_exc_outliers$Collateral_market_value, na.rm = T)
+sd_colateral <- sd(df2_exc_outliers$Collateral_market_value, na.rm = T)
+
+kable(cbind(mean_colateral, min_colateral, max_colateral, median_colateral, sd_colateral))
+
+
+ggplot(data = df2_exc_outliers, aes(x = Collateral_market_value)) + 
+  geom_histogram() +
+  ggtitle("Collateral Value Histogram")
+
+
+# mean_loan / mean_colateral
+
+```
+i)
+* On average `r paste(round((mean_loan / mean_colateral)*100, 2), "%")` of the cash loan is backed up by collateral.
+
+## maturity length
+
+```{r maturity length}
+df2_maturity <- df2_proc %>% 
+  mutate(maturity_length = interval(`Reporting Date`, Maturity_date,) %/% months(1),
+         maturity_length_interval = cut(maturity_length, breaks=c(0,6,12,18,24,30,36), right = FALSE),
+         maturity_length_grouped = ifelse(is.na(maturity_length_interval), "36+ months",gsub(",", "-",gsub("\\)", " months",gsub("\\[", "",maturity_length_interval)))),
+         maturity_length_factor = factor(maturity_length_grouped, levels = c("0-6 months", "6-12 months", "12-18 months", "18-24 months", "24-30 months", "30-36 months", "36+ months"))
+         )
+```
+
+b)i)  
+
+## Aggregated Table
+```{r Aggregated Table}
+df2_agg <- df2_maturity %>% 
+  group_by(maturity_length_factor, Reporting_Counterparty_side) %>% 
+  summarise(`Total value_of_loan` = sum(Value_of_loan, na.rm = TRUE),
+            `Count of Reports` = n())
+
+kable(df2_agg)
+```
+
+ii) Maturities are not given in this part, see next answer for top firms by maturity  
+
+## Aggregated Table for Top Firms 
+```{r Aggregated Table for Top Firms }
+df2_agg_top_firms <- df2_maturity %>% 
+  group_by(Counterparty_name) %>% 
+  summarise(`Total value_of_loan` = sum(Value_of_loan, na.rm = TRUE)) %>% 
+  slice_max(order_by = `Total value_of_loan`, n =5)  
+
+kable(df2_agg_top_firms)
+```
+
+iii) 
+
+## Aggregated Table for Top Firms by maturity
+```{r Aggregated Table for Top Firms by maturity}
+df2_agg_top_firms_by_maturity <- df2_maturity %>% 
+  group_by(maturity_length_factor, Counterparty_name) %>% 
+  summarise(`Total value_of_loan` = sum(Value_of_loan, na.rm = TRUE)) %>% 
+  slice_max(order_by = `Total value_of_loan`, n =5) 
+
+kable(df2_agg_top_firms_by_maturity)
+
+```
+
+iv) 
+## Exposure Risk
+```{r Exposure Risk}
+df2_asset_exposed <- df2_maturity %>% 
+  group_by(Type_of_Asset, maturity_length_factor) %>% 
+  summarise(`Total value_of_loan` = sum(Value_of_loan, na.rm = TRUE),
+            `Count of Loans` = n()) 
+
+kable(df2_asset_exposed)
+
+df2_asset_exposed_transaction_not_cleared <- df2_maturity %>% 
+  filter(Cleared_by_CCP == FALSE) %>% 
+  group_by(Type_of_Asset, maturity_length_factor) %>% 
+  summarise(`Total value_of_loan` = sum(Value_of_loan, na.rm = TRUE),
+            `Count of Loans` = n()) 
+
+long_term_filter <- df2_asset_exposed$maturity_length_factor == "24-30 months" |df2_asset_exposed$maturity_length_factor == "30-36 months" |df2_asset_exposed$maturity_length_factor == "36+ months"
+
+df2_long_term <- df2_asset_exposed[long_term_filter,] 
+
+df2_long_term_secu_exposure <- df2_long_term %>% 
+  filter(Type_of_Asset == "SECU") %>% 
+  group_by(Type_of_Asset) %>% 
+  summarise(Total = sum(`Total value_of_loan`))
+
+df2_long_term_comm_exposure <- df2_long_term %>% 
+  filter(Type_of_Asset == "COMM") %>% 
+  group_by(Type_of_Asset) %>% 
+  summarise(Total = sum(`Total value_of_loan`))
+       
+
+df2_long_term_transaction_not_cleared <- df2_asset_exposed_transaction_not_cleared[long_term_filter,] 
+
+df2_long_term_secu_exposure_transaction_not_cleared <- df2_long_term_transaction_not_cleared %>% 
+  filter(Type_of_Asset == "SECU") %>% 
+  group_by(Type_of_Asset) %>% 
+  summarise(Total = sum(`Total value_of_loan`))
+
+df2_long_term_comm_exposure_transaction_not_cleared <- df2_long_term_transaction_not_cleared %>% 
+  filter(Type_of_Asset == "COMM") %>% 
+  group_by(Type_of_Asset) %>% 
+  summarise(Total = sum(`Total value_of_loan`))
+
+kable(df2_asset_exposed_transaction_not_cleared)
+```
+3)d) Long term lending is likely to mean a greater exposure to default risk as the parties are subject to a wider array of uncertainty such as economic and political climate - when compared to a shorter time horizon. For this reason, I will compare the number of loans for each asset class within each of the time-to-maturity buckets. Under this criteria both asset classes seem comparable however, looking instead at 24 + months we can see that securities has a greater number of loans, approximately 10% more. This leads to a an overall long term loan value of **`r paste0(round(df2_long_term_secu_exposure$Total / 1e9, 1), " Billion MEC")`** for securities compared to for  **`r paste0(round(df2_long_term_comm_exposure$Total / 1e9, 1), " Billion MEC") `** commodities.
+If we instead restrict attention to transactions that were not cleared by a CCP we find that there are more long term commodity loans, thus making commodities the more risky asset class. From the table supplied we can see that there are 684 commodity transactions compared to 636. These long term commodity transactions total **`r paste0(round(df2_long_term_comm_exposure_transaction_not_cleared$Total / 1e9, 1), " Billion MEC")`** in loan value. This is considerably more than the amount for securities, **`r paste0(round(df2_long_term_secu_exposure_transaction_not_cleared$Total / 1e9, 1), " Billion MEC")`**
